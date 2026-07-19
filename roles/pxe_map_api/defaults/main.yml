@@ -1,0 +1,27 @@
+---
+pxe_map_api_user: pxe-map-api
+pxe_map_api_group: "{{ pxe_map_api_user }}"
+
+pxe_map_api_app_dir: /opt/pxe-map-api
+pxe_map_api_venv_dir: "{{ pxe_map_api_app_dir }}/.venv"
+pxe_map_api_config_dir: /etc/pxe-map-api
+
+# PXE_MAP_DIR / PXE_MAP_BIND / PXE_MAP_TOKEN - see app/config.py. Bind and
+# dir are given safe defaults here; token has none on purpose (see
+# preflight.yml) so a site can't accidentally deploy unauthenticated.
+pxe_map_api_dir: /var/www/pxe-map
+pxe_map_api_bind: "0.0.0.0:8080"
+pxe_map_api_token: ""
+pxe_map_api_allow_no_auth: false
+
+# Air-gapped: pip installs from this local mirror only, never PyPI. Same
+# requirement as the old deploy/install.sh's LOCAL_MIRROR.
+pxe_map_api_local_mirror: /path/to/local/pip-mirror
+
+# Where the playbook copies app/ and requirements.txt from: this repo
+# (pxe-map-api-ansible) is separate from the app repo (pxe-map-api), so
+# this has to point at a checkout of the latter. Defaults to a sibling
+# directory of this repo (`../pxe-map-api`), which is where DEPLOY.md tells
+# you to put it - override (in group_vars, or with -e) if you keep it
+# somewhere else, e.g. a CI checkout path or a staged release tarball.
+pxe_map_api_src_dir: "{{ playbook_dir }}/../pxe-map-api"
