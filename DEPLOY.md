@@ -1,10 +1,21 @@
-# Deploying pxe-map-api to the site PXE VMs
+# Deploying the PXE boot chain + pxe-map-api to the site PXE VMs
 
-Target: 5 site PXE VMs (RHEL 9.4, SELinux enforcing), one per site, each
-already running dnsmasq (TFTP) and nginx serving `/var/www/pxe-map/`
-read-only (see the `pxe-map-api` repo's `SPEC.md` for that existing setup -
-this guide only covers installing the API service itself). All 5 are
-installed and updated from this repo's playbook.
+Target: 5 site PXE VMs (RHEL 9.4, SELinux enforcing), one per site. This
+repo provisions **both layers** of each VM from scratch:
+
+1. **`pxe_server`** - TFTP (dnsmasq) + nginx boot-chain prerequisites: iPXE
+   firmware served over TFTP, `/var/www/pxe-map/` served read-only over
+   HTTP. See `roles/pxe_server/README.md` for the full boot chain this
+   implements.
+2. **`pxe_map_api`** - installs/configures/upgrades
+   [pxe-map-api](https://github.com/team-redbull/pxe-map-api) itself (see
+   that repo's `SPEC.md` for full background), the service that writes the
+   per-MAC files layer 1's nginx serves.
+
+Both roles are tag-selectable, so you can run just layer 1, just layer 2,
+or both (the default - see "Running just one layer" below). A brand-new
+site VM needs layer 1 applied at least once before layer 2's files are
+reachable over HTTP; after that, re-running either independently is fine.
 
 ## 0. Prerequisites
 
@@ -15,11 +26,17 @@ installed and updated from this repo's playbook.
   ```bash
   ansible-galaxy collection install -r requirements.yml
   ```
-- A local pip package mirror reachable from every site VM, containing
-  `fastapi==0.115.6`, `uvicorn==0.34.0`, `pydantic==2.10.4`,
-  `python-dotenv==1.2.2` and their transitive deps (see the app repo's
-  `requirements.txt` - always check that file, this list can drift out of
-  date). Air-gapped: the role runs
+- Every site VM's `dnf`/yum already pointed at your local OS package
+  mirror/Satellite (this repo doesn't configure repo files itself, just
+  installs from whatever's configured) - it needs to provide `dnsmasq`,
+  `nginx`, `tftp-server`, `ipxe-bootimgs-x86`, and
+  `policycoreutils-python-utils` for the `pxe_server` role. Air-gapped:
+  no internet access is assumed or used.
+- A local **pip** package mirror reachable from every site VM (separate
+  from the OS package mirror above), containing `fastapi==0.115.6`,
+  `uvicorn==0.34.0`, `pydantic==2.10.4`, `python-dotenv==1.2.2` and their
+  transitive deps (see the app repo's `requirements.txt` - always check
+  that file, this list can drift out of date). The `pxe_map_api` role runs
   `pip install --no-index --find-links=<mirror>` - it never touches PyPI.
 - **A checkout of the `pxe-map-api` app repo as a sibling directory of this
   one**:
@@ -53,7 +70,23 @@ pxe_map_api_local_mirror: /path/to/your/local/pip-mirror
 Override per-site in `inventory/host_vars/<site>/vars.yml` if a site's
 mirror path differs.
 
-## 3. Generate and vault a token per site
+## 3. Set each site's provisioning IP and NIC (for `pxe_server`)
+
+Edit `inventory/host_vars/<site>/vars.yml` for each of the 5 sites and
+replace the placeholder values:
+
+```yaml
+pxe_server_vm_ip: "10.10.1.5"    # this site's provisioning-facing IP -
+                                  # templated into boot.ipxe's chain URL
+pxe_server_interface: eth0        # NIC dnsmasq binds to on this VM
+```
+
+There's no sensible shared default across sites, so both are required
+before running `--tags pxe_server` for real (the role defaults to
+`CHANGE_ME`, which will template a broken `boot.ipxe` rather than fail the
+run outright - fix it before relying on it).
+
+## 4. Generate and vault a token per site
 
 **Do not reuse one token across all 5 sites** - if one site's PXE VM is
 compromised, the others must not be. For each site:
@@ -74,7 +107,7 @@ see the app repo's `CLAUDE.md`), skip the token and set
 `pxe_map_api_allow_no_auth: true` in that site's `vars.yml` instead. The
 playbook's preflight check refuses to deploy an empty token otherwise.
 
-## 4. Review the bind address per site
+## 5. Review the bind address per site
 
 Default (`roles/pxe_map_api/defaults/main.yml`):
 `pxe_map_api_bind: "0.0.0.0:8080"` - listens on every interface. This is
@@ -92,7 +125,7 @@ or firewall 8080 down to the central endpoint's source IP on each VM.
 Never bind on the interface that serves PXE/TFTP/nginx traffic to booting
 hosts.
 
-## 5. Run it
+## 6. Run it
 
 ```bash
 ansible-playbook site.yml --ask-vault-pass
@@ -101,10 +134,62 @@ ansible-playbook site.yml --ask-vault-pass
 (`--vault-password-file <path>` instead of `--ask-vault-pass` if you keep
 the vault password in a file - keep that file out of git.)
 
-This targets all 5 sites in parallel by default. To roll out to one site
-first: `ansible-playbook site.yml --ask-vault-pass --limit pxe-site1`.
+This targets all 5 sites in parallel, running **both** roles, by default.
+To roll out to one site first: `ansible-playbook site.yml --ask-vault-pass
+--limit pxe-site1`.
 
-The role, in order, on each VM:
+### Running just one layer
+
+Both roles are tagged (`pxe_server`, `pxe_map_api`) so either can be run on
+its own, on all sites or `--limit`ed to one:
+
+```bash
+# Just the nginx/dnsmasq boot-chain prerequisites, no API app:
+ansible-playbook site.yml --ask-vault-pass --tags pxe_server
+
+# Just the pxe-map-api app (layer 1 must already exist on that host):
+ansible-playbook site.yml --ask-vault-pass --tags pxe_map_api
+
+# Either, restricted to one site:
+ansible-playbook site.yml --ask-vault-pass --tags pxe_server --limit pxe-site1
+```
+
+`site.yml` always applies `pxe_server` before `pxe_map_api` in a
+default (untagged) run, so the ownership of `/var/www/pxe-map` always
+converges the same way. If you only ever run one tag on a given host,
+that's stable too. Alternating tags on the same host will make that
+directory's owner flip between `nginx` and `pxe-map-api` each time -
+harmless (mode `0755` keeps it world-readable either way) but you may see
+it reported as a "changed" task. See `roles/pxe_server/README.md` for
+more detail.
+
+### What each role does, on each VM
+
+`pxe_server` (layer 1):
+
+1. Installs `dnsmasq`, `nginx`, `tftp-server`, `ipxe-bootimgs-x86`,
+   `policycoreutils-python-utils` from the configured local mirror.
+2. Copies `ipxe.efi` into `/var/lib/tftpboot/`.
+3. Templates `/var/lib/tftpboot/boot.ipxe` (this site's `pxe_server_vm_ip`
+   is the only templated value - the iPXE runtime variables in it are not
+   Jinja-expanded).
+4. Templates `/etc/dnsmasq.conf` in TFTP-only mode (no DNS, no DHCP).
+5. Disables the stock nginx default server block's `listen 80` directives
+   (idempotent - it no-ops once already disabled) so it doesn't conflict
+   with the PXE map server block, and templates
+   `/etc/nginx/conf.d/pxe-map.conf`.
+6. Creates `/var/www/pxe-map` (owner `nginx`, mode `0755`) if it doesn't
+   already exist as something else.
+7. Registers SELinux fcontexts (`httpd_sys_content_t` on the PXE map dir,
+   `tftpdir_rw_t` on the TFTP root) and runs `restorecon -Rv` on both.
+   Skipped automatically on a non-SELinux host (e.g. testing in a
+   container).
+8. Opens firewalld for the `tftp` and `http` services and the dnsmasq TFTP
+   data port range (`50000-50100/udp` by default), permanent + immediate.
+9. Enables and starts `dnsmasq` and `nginx`; handlers restart either only
+   if its config actually changed.
+
+`pxe_map_api` (layer 2):
 
 1. Fails the run (preflight) if that site has no token and hasn't
    explicitly opted into `pxe_map_api_allow_no_auth`, or if the app repo
@@ -115,21 +200,35 @@ The role, in order, on each VM:
 4. Registers the persistent SELinux fcontext rule
    (`httpd_sys_content_t` on `/var/www/pxe-map(/.*)?`) and runs
    `restorecon -Rv` so the label survives reboots and reruns. Skipped
-   automatically on a non-SELinux host (e.g. testing in a container).
+   automatically on a non-SELinux host.
 5. Copies `app/` and `requirements.txt` (from the sibling `pxe-map-api`
    checkout) into `/opt/pxe-map-api`, creates a venv there, and installs
-   deps from the local mirror with `pip install --no-index` (never touches
-   the network).
+   deps from the local pip mirror with `pip install --no-index` (never
+   touches the network).
 6. Renders `/etc/pxe-map-api/env` from that site's `vars.yml`/`vault.yml`
    (`PXE_MAP_DIR`, `PXE_MAP_BIND`, `PXE_MAP_TOKEN`) and the systemd unit,
    both from Jinja2 templates in `roles/pxe_map_api/templates/`.
 7. Restarts the service if the env file, unit file, or app code changed;
    enables and starts it either way.
 
-It's idempotent - rerun any time (e.g. after an app code change, or to
-pick up a rotated token) and only what actually changed gets touched.
+Both roles are idempotent - rerun any time (e.g. after an app code change,
+to pick up a rotated token, or to reapply layer 1's config) and only
+what actually changed gets touched.
 
-## 6. Verify end-to-end on one VM
+## 7. Verify the boot-chain layer on one VM
+
+```bash
+ssh <site-vm>
+sudo systemctl status dnsmasq nginx
+curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/pxe-map/   # -> 403 (autoindex off) or 404, not connection refused
+tftp localhost -c get boot.ipxe /tmp/boot.ipxe && cat /tmp/boot.ipxe
+ls -Z /var/www/pxe-map /var/lib/tftpboot
+# -> httpd_sys_content_t on /var/www/pxe-map, tftpdir_rw_t on /var/lib/tftpboot
+sudo firewall-cmd --list-all
+# -> tftp and http services, and the 50000-100/udp port range, all present
+```
+
+## 8. Verify the API layer on one VM
 
 ```bash
 ssh <site-vm>
@@ -151,8 +250,8 @@ cat /var/www/pxe-map/aabbccddee01.ipxe
 ls -Z /var/www/pxe-map/aabbccddee01.ipxe
 # -> should show httpd_sys_content_t
 
-# confirm nginx (already configured, not part of this service) can serve it:
 curl -sS http://localhost/pxe-map/aabbccddee01.ipxe
+# -> confirms nginx (from the pxe_server role) can serve what the API wrote
 
 curl -sS -X DELETE localhost:${PORT}/pxe-map/aabbccddee01 \
   -H "Authorization: Bearer $TOKEN"
@@ -160,14 +259,14 @@ curl -sS -X DELETE localhost:${PORT}/pxe-map/aabbccddee01 \
 ```
 
 If the `ls -Z` context isn't `httpd_sys_content_t`, the SELinux fcontext
-rule didn't take - rerun the playbook (step 5 above) and check
+rule didn't take - rerun the playbook and check
 `sudo ausearch -m avc -ts recent` for denials.
 
 Also: `sudo journalctl -u pxe-map-api -f` to tail logs while testing - see
 the app repo's `app/main.py` request-logging middleware for what gets
 logged per request.
 
-## 7. Point the central BMH-creation endpoint at it
+## 9. Point the central BMH-creation endpoint at it
 
 Give the central endpoint's operators, per site:
 
@@ -184,8 +283,8 @@ caller's job.
 
 ```bash
 git -C ../pxe-map-api pull   # pick up app code changes first
-ansible-playbook site.yml --ask-vault-pass                     # all 5 sites
-ansible-playbook site.yml --ask-vault-pass --limit pxe-site3   # just one
+ansible-playbook site.yml --ask-vault-pass                     # both roles, all 5 sites
+ansible-playbook site.yml --ask-vault-pass --limit pxe-site3   # both roles, just one site
 ```
 
 Re-copies `app/`, reinstalls deps, re-renders the env/unit files, and
@@ -199,14 +298,23 @@ Not automated (removal is rare and destructive enough to want a human
 doing it deliberately, not a playbook flag). On the VM:
 
 ```bash
+# pxe_map_api layer:
 sudo systemctl disable --now pxe-map-api
 sudo rm /etc/systemd/system/pxe-map-api.service
 sudo systemctl daemon-reload
 sudo rm -rf /opt/pxe-map-api /etc/pxe-map-api
+
+# pxe_server layer (only if decommissioning the whole VM - this breaks PXE
+# boot for every host at this site):
+sudo systemctl disable --now dnsmasq nginx
+sudo rm -f /etc/nginx/conf.d/pxe-map.conf /etc/dnsmasq.conf
+sudo rm -rf /var/lib/tftpboot
+
 # /var/www/pxe-map and its SELinux fcontext rule are left in place
-# deliberately - it holds the source-of-truth files. Remove manually if
-# you're decommissioning the whole VM:
+# deliberately by both of the above - it holds the source-of-truth files.
+# Remove manually if you're decommissioning the whole VM:
 #   sudo semanage fcontext -d "/var/www/pxe-map(/.*)?"
+#   sudo semanage fcontext -d "/var/lib/tftpboot(/.*)?"
 #   sudo rm -rf /var/www/pxe-map
 #   sudo userdel pxe-map-api
 ```
