@@ -16,10 +16,11 @@ installed and updated from this repo's playbook.
   ansible-galaxy collection install -r requirements.yml
   ```
 - A local pip package mirror reachable from every site VM, containing
-  `fastapi==0.115.6`, `uvicorn==0.34.0`, `pydantic==2.10.4` and their
-  transitive deps (see the app repo's `requirements.txt`). Air-gapped: the
-  role runs `pip install --no-index --find-links=<mirror>` - it never
-  touches PyPI.
+  `fastapi==0.115.6`, `uvicorn==0.34.0`, `pydantic==2.10.4`,
+  `python-dotenv==1.2.2` and their transitive deps (see the app repo's
+  `requirements.txt` - always check that file, this list can drift out of
+  date). Air-gapped: the role runs
+  `pip install --no-index --find-links=<mirror>` - it never touches PyPI.
 - **A checkout of the `pxe-map-api` app repo as a sibling directory of this
   one**:
   ```
