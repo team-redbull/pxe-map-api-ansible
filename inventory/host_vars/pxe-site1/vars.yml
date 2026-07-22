@@ -6,3 +6,9 @@
 # pxe_map_api_bind: "10.10.1.5:8080"   # this site's management-facing IP,
 #                                       # instead of the 0.0.0.0:8080 default
 #                                       # (see DEPLOY.md "Bind address")
+
+# REQUIRED by the pxe_server role - no sensible shared default across sites.
+# Replace both with this site's real provisioning-facing IP and NIC before
+# running --tags pxe_server (see DEPLOY.md).
+pxe_server_vm_ip: "10.10.1.5"
+pxe_server_interface: eth0

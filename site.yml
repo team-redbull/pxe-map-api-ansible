@@ -1,6 +1,13 @@
 ---
-- name: Install and configure pxe-map-api on every site PXE VM
+- name: Provision the PXE boot-chain prerequisites and pxe-map-api on every site PXE VM
   hosts: pxe_map_api_sites
   become: true
   roles:
-    - pxe_map_api
+    # Layer 1: TFTP (dnsmasq) + nginx boot-chain prerequisites.
+    # Run alone with: --tags pxe_server
+    - role: pxe_server
+      tags: [pxe_server]
+    # Layer 2: the pxe-map-api app itself.
+    # Run alone with: --tags pxe_map_api
+    - role: pxe_map_api
+      tags: [pxe_map_api]

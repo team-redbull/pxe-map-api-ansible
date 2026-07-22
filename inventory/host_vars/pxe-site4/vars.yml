@@ -2,3 +2,8 @@
 # Non-secret per-site overrides for pxe-site4. See
 # host_vars/pxe-site1/vars.yml for the full explanation of what can go here
 # (e.g. pxe_map_api_bind).
+
+# REQUIRED by the pxe_server role - replace with this site's real
+# provisioning-facing IP and NIC before running --tags pxe_server.
+pxe_server_vm_ip: "10.10.4.5"
+pxe_server_interface: eth0
