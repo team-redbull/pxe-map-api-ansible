@@ -1,0 +1,13 @@
+{# $uri below is nginx's own variable syntax, not Jinja2 - Jinja only expands
+   double-brace and percent-brace tags, so a bare dollar-sign variable like
+   $uri passes through untouched. Noted here only so nobody "fixes" it into
+   a Jinja variable by mistake. -#}
+server {
+    listen 80;
+    root /var/www;
+
+    location /pxe-map/ {
+        autoindex off;
+        try_files $uri =404;
+    }
+}

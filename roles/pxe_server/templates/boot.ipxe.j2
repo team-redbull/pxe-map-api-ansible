@@ -1,0 +1,16 @@
+#!ipxe
+{# ${net0/mac} and ${net0/mac:hexraw} below are iPXE runtime variables, NOT
+   Jinja2 - they're resolved by iPXE on the booting host at boot time, not by
+   Ansible at template time. Wrapped in {% raw %} so Jinja leaves them alone;
+   only pxe_server_vm_ip is templated by Ansible. Letting Jinja touch these
+   is the single most likely bug in this role - it would silently render an
+   empty or garbage lookup key and break every host's PXE boot. -#}
+{% raw -%}
+echo Booting NIC MAC: ${net0/mac} (lookup key: ${net0/mac:hexraw})
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net0/mac:hexraw}.ipxe || goto failed
+:failed
+echo No PXE mapping found for MAC ${net0/mac:hexraw}
+echo Rebooting in 30 seconds...
+sleep 30
+reboot
+{% endraw %}

@@ -1,0 +1,125 @@
+---
+- name: Install PXE server packages (from the configured local mirror/Satellite)
+  ansible.builtin.dnf:
+    name:
+      - dnsmasq
+      - nginx
+      - tftp-server
+      - ipxe-bootimgs-x86
+      - policycoreutils-python-utils
+    state: present
+
+- name: Copy ipxe.efi into the TFTP root
+  ansible.builtin.copy:
+    src: "{{ pxe_server_ipxe_efi_src }}"
+    dest: "{{ pxe_server_tftp_root }}/ipxe.efi"
+    remote_src: true
+    mode: "0644"
+
+- name: Template boot.ipxe
+  ansible.builtin.template:
+    src: boot.ipxe.j2
+    dest: "{{ pxe_server_tftp_root }}/boot.ipxe"
+    mode: "0644"
+
+- name: Template /etc/dnsmasq.conf (TFTP only, no DNS, no DHCP)
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart dnsmasq
+
+# The stock RHEL nginx.conf ships a "server { listen 80 default_server; ... }"
+# block that otherwise conflicts with pxe-map.conf below ("listen directive is
+# not allowed here"). Disabling just the listen directives (rather than
+# deleting the whole block) is enough to resolve the conflict and is safe to
+# match idempotently - it no-ops once already commented out.
+- name: Disable the stock nginx default server block on port 80 (IPv4)
+  ansible.builtin.replace:
+    path: /etc/nginx/nginx.conf
+    regexp: '^(\s*)listen(\s+)80 default_server;'
+    replace: '\1# listen\g<2>80 default_server;  # disabled by pxe_server role, conflicts with pxe-map.conf'
+  notify: Restart nginx
+
+- name: Disable the stock nginx default server block on port 80 (IPv6)
+  ansible.builtin.replace:
+    path: /etc/nginx/nginx.conf
+    regexp: '^(\s*)listen(\s+)\[::\]:80 default_server;'
+    replace: '\1# listen\g<2>[::]:80 default_server;  # disabled by pxe_server role, conflicts with pxe-map.conf'
+  notify: Restart nginx
+
+- name: Template /etc/nginx/conf.d/pxe-map.conf
+  ansible.builtin.template:
+    src: nginx-pxe-map.conf.j2
+    dest: /etc/nginx/conf.d/pxe-map.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+- name: Create the PXE map directory
+  ansible.builtin.file:
+    path: "{{ pxe_server_pxe_map_dir }}"
+    state: directory
+    owner: nginx
+    group: nginx
+    mode: "0755"
+
+- name: Register persistent SELinux file context for the PXE map directory (httpd_sys_content_t)
+  community.general.sefcontext:
+    target: "{{ pxe_server_pxe_map_dir }}(/.*)?"
+    setype: httpd_sys_content_t
+    state: present
+  when: ansible_facts.selinux.status | default('disabled') == 'enabled'
+
+- name: Apply the SELinux context to the PXE map directory
+  ansible.builtin.command:
+    cmd: restorecon -Rv {{ pxe_server_pxe_map_dir | quote }}
+  register: _pxe_server_pxe_map_restorecon
+  changed_when: _pxe_server_pxe_map_restorecon.stdout != ""
+  when: ansible_facts.selinux.status | default('disabled') == 'enabled'
+
+- name: Register persistent SELinux file context for the TFTP root (tftpdir_rw_t)
+  community.general.sefcontext:
+    target: "{{ pxe_server_tftp_root }}(/.*)?"
+    setype: tftpdir_rw_t
+    state: present
+  when: ansible_facts.selinux.status | default('disabled') == 'enabled'
+
+- name: Apply the SELinux context to the TFTP root
+  ansible.builtin.command:
+    cmd: restorecon -Rv {{ pxe_server_tftp_root | quote }}
+  register: _pxe_server_tftp_restorecon
+  changed_when: _pxe_server_tftp_restorecon.stdout != ""
+  when: ansible_facts.selinux.status | default('disabled') == 'enabled'
+
+- name: Open firewalld for TFTP and HTTP
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - tftp
+    - http
+
+- name: Open firewalld for the dnsmasq TFTP data port range
+  ansible.posix.firewalld:
+    port: "{{ pxe_server_tftp_port_range_start }}-{{ pxe_server_tftp_port_range_end }}/udp"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Enable and start dnsmasq
+  ansible.builtin.service:
+    name: dnsmasq
+    enabled: true
+    state: started
+
+- name: Enable and start nginx
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started

@@ -1,0 +1,8 @@
+port=0
+enable-tftp
+tftp-root={{ pxe_server_tftp_root }}
+tftp-port-range={{ pxe_server_tftp_port_range_start }},{{ pxe_server_tftp_port_range_end }}
+interface={{ pxe_server_interface }}
+bind-interfaces
+log-facility=/var/log/dnsmasq.log
+log-dhcp

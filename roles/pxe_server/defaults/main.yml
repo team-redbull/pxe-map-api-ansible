@@ -1,0 +1,19 @@
+---
+# This site's provisioning-facing IP and NIC - used inside boot.ipxe (the
+# HTTP chain URL) and to bind dnsmasq's TFTP listener respectively. No
+# sensible shared default across sites; every site must override both in
+# inventory/host_vars/<site>/vars.yml.
+pxe_server_vm_ip: CHANGE_ME
+pxe_server_interface: CHANGE_ME
+
+pxe_server_tftp_root: /var/lib/tftpboot
+
+# Same literal path as pxe_map_api_dir (roles/pxe_map_api/defaults/main.yml)
+# - this is nginx's serving root for the API-managed per-MAC mapping files.
+# If you override one per site, override the other to match.
+pxe_server_pxe_map_dir: /var/www/pxe-map
+
+pxe_server_tftp_port_range_start: 50000
+pxe_server_tftp_port_range_end: 50100
+
+pxe_server_ipxe_efi_src: /usr/share/ipxe/ipxe-x86_64.efi
