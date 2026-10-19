@@ -22,8 +22,14 @@
     group: "{{ pxe_map_api_group }}"
     mode: "0755"
 
-- name: Normalize permissions on any mapping files already in PXE_MAP_DIR
+# Depth 2: the per-MAC files at the top, plus the per-MCE directories holding
+# the InfraEnv boot entries (<mce_cluster>/<infra_env>.ipxe) one level down.
+# The app writes 0644 / 0755 itself; this only repairs files written by an
+# older app version (which left them 0600).
+- name: Normalize permissions on any mapping files and boot-entry directories already in PXE_MAP_DIR
   ansible.builtin.command:
     cmd: >-
-      find {{ pxe_map_api_dir | quote }} -maxdepth 1 -type f -exec chmod 0644 {} +
+      find {{ pxe_map_api_dir | quote }} -mindepth 1 -maxdepth 2
+      ( -type d -exec chmod 0755 {} + )
+      -o ( -type f -exec chmod 0644 {} + )
   changed_when: false  # chmod is idempotent; not worth tracking as a "change" each run

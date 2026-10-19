@@ -14,10 +14,16 @@ sibling `pxe_map_api` role for that).
 3. iPXE re-DHCPs with option 77 = `iPXE`. Windows DHCP policy returns
    `filename` = `boot.ipxe`.
 4. iPXE TFTPs `boot.ipxe` from this VM. That file chains over HTTP to
-   `/pxe-map/<mac>.ipxe` on this VM, where `<mac>` is the booting NIC's MAC as
-   12 lowercase hex chars, no separators.
-5. That per-MAC file chains to the host's InfraEnv iPXE script on the hub
-   cluster (owned by `pxe-map-api`, not this role).
+   `/pxe-map/<mac>.ipxe` on this VM, where `<mac>` is a NIC's MAC as 12
+   lowercase hex chars, no separators. It tries `${netX}` (the NIC iPXE booted
+   from) first and then `net0`-`net3`, because install-server maps only the
+   BareMetalHost's boot MAC and the full `ipxe.efi` enumerates every NIC - `net0`
+   need not be the mapped one.
+5. That per-MAC file holds a relative `chain <mce_cluster>/<infra_env>.ipxe`,
+   i.e. `/pxe-map/<mce_cluster>/<infra_env>.ipxe` on this VM: the InfraEnv's
+   boot entry, which chains to the InfraEnv's iPXE script on that MCE. Both
+   files are owned by `pxe-map-api`, not this role (older mappings chain
+   straight to the InfraEnv URL instead).
 
 ## Variables (see `defaults/main.yml`)
 
@@ -33,8 +39,9 @@ sibling `pxe_map_api` role for that).
 ## Out of scope (on purpose)
 
 - DHCP configuration - the external Windows DHCP server is out of scope.
-- Per-MAC `pxe-map` file management - `pxe-map-api` owns that; this role only
-  creates the empty directory.
+- Per-MAC `pxe-map` files and the per-MCE `<mce_cluster>/` boot-entry
+  directories - `pxe-map-api` owns those; this role only creates the empty
+  top-level directory.
 - Any verification/curl/tftp-get checks - configuration only.
 - Disabling or loosening SELinux - it must stay enforcing.
 

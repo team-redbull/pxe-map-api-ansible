@@ -1,15 +1,31 @@
 #!ipxe
-{# ${net0/mac} and ${net0/mac:hexraw} below are iPXE runtime variables, NOT
+{# ${netX/mac}, ${net0/mac:hexraw} etc. below are iPXE runtime variables, NOT
    Jinja2 - they're resolved by iPXE on the booting host at boot time, not by
    Ansible at template time. Wrapped in {% raw %} so Jinja leaves them alone;
    only pxe_server_vm_ip is templated by Ansible. Letting Jinja touch these
    is the single most likely bug in this role - it would silently render an
-   empty or garbage lookup key and break every host's PXE boot. -#}
+   empty or garbage lookup key and break every host's PXE boot.
+
+   EVERY NIC's MAC is tried, not just net0's. install-server maps only the
+   BareMetalHost's boot MAC (the first link-up NIC server-scan lists), and the
+   firmware loads the full ipxe.efi, which drives every NIC: net0 is merely
+   the first one iPXE enumerated, not necessarily the one that booted or the
+   one that was mapped. netX (the device iPXE last opened - the one that got
+   DHCP and fetched this script) goes first, then net0..net3. Each lookup that
+   finds no file is a 404 and falls through via `||`; an absent device expands
+   to an empty key (`/pxe-map/.ipxe`), which is a 404 as well. Every MAC
+   tried is this host's own, so whichever one is mapped is this host's
+   mapping. -#}
 {% raw -%}
-echo Booting NIC MAC: ${net0/mac} (lookup key: ${net0/mac:hexraw})
-chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net0/mac:hexraw}.ipxe || goto failed
+echo Booting NIC MAC: ${netX/mac} (also trying net0-net3)
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${netX/mac:hexraw}.ipxe ||
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net0/mac:hexraw}.ipxe ||
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net1/mac:hexraw}.ipxe ||
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net2/mac:hexraw}.ipxe ||
+chain http://{% endraw %}{{ pxe_server_vm_ip }}{% raw %}/pxe-map/${net3/mac:hexraw}.ipxe ||
+goto failed
 :failed
-echo No PXE mapping found for MAC ${net0/mac:hexraw}
+echo No PXE mapping found for any NIC: ${net0/mac:hexraw} ${net1/mac:hexraw} ${net2/mac:hexraw} ${net3/mac:hexraw}
 echo Rebooting in 30 seconds...
 sleep 30
 reboot

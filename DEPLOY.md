@@ -292,6 +292,15 @@ restarts the service only if something actually changed. To rotate a
 site's token: `ansible-vault edit inventory/host_vars/<site>/vault.yml`,
 then rerun the playbook for that site.
 
+**InfraEnv boot entries (pxe-map-api `7354800` and later)** change BOTH
+layers, so run both roles (the default above, no `--tags`): `pxe_server`
+re-templates `boot.ipxe` to look up every NIC's MAC (install-server now maps
+only the BareMetalHost's boot MAC), and `pxe_map_api` deploys the app that
+writes `<mce_cluster>/<infra_env>.ipxe` boot entries, the conditional
+`DELETE ?mce_cluster=` remove-server relies on, and `0644` files nginx can
+read. The `workflows` repo's server-lifecycle-worker on each MCE needs this
+on its site's VM: until then IPMI installs fail with a 422 from the old API.
+
 ## Uninstalling
 
 Not automated (removal is rare and destructive enough to want a human
