@@ -26,11 +26,44 @@
     mode: "0644"
   notify: Restart pxe-map-api
 
+- name: Install the Python the venv is built with (from AppStream, via the OS mirror)
+  ansible.builtin.dnf:
+    name: "{{ pxe_map_api_python }}"
+    state: present
+
+# The pip task below never rebuilds a venv that already exists, so one built
+# with another interpreter (the platform 3.9, from before this role pinned
+# one) would silently keep it. Rebuild it instead.
+- name: Check for an existing venv
+  ansible.builtin.stat:
+    path: "{{ pxe_map_api_venv_dir }}/bin/python"
+  register: _pxe_map_api_venv_stat
+
+- name: Read the existing venv's Python version
+  ansible.builtin.command:
+    argv:
+      - "{{ pxe_map_api_venv_dir }}/bin/python"
+      - -c
+      - import sys; print('%d.%d' % sys.version_info[:2])
+  register: _pxe_map_api_venv_python
+  changed_when: false
+  failed_when: false
+  when: _pxe_map_api_venv_stat.stat.exists
+
+- name: Remove a venv built with another (or a broken) Python
+  ansible.builtin.file:
+    path: "{{ pxe_map_api_venv_dir }}"
+    state: absent
+  when:
+    - _pxe_map_api_venv_stat.stat.exists
+    - (_pxe_map_api_venv_python.rc != 0) or (_pxe_map_api_venv_python.stdout | trim != pxe_map_api_python_version)
+  notify: Restart pxe-map-api
+
 - name: Create the venv and install dependencies from the local mirror (air-gapped, no PyPI)
   ansible.builtin.pip:
     requirements: "{{ pxe_map_api_app_dir }}/requirements.txt"
     virtualenv: "{{ pxe_map_api_venv_dir }}"
-    virtualenv_command: python3 -m venv
+    virtualenv_command: "{{ pxe_map_api_python }} -m venv"
     extra_args: "--no-index --find-links={{ pxe_map_api_local_mirror }}"
   notify: Restart pxe-map-api
 

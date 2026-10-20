@@ -20,6 +20,24 @@
       pxe_map_api_token is set (or no-auth explicitly allowed) for
       {{ inventory_hostname }}
 
+- name: Refuse to deploy without saying who may reach the API port
+  ansible.builtin.assert:
+    that:
+      - (pxe_map_api_allowed_sources | length > 0) or pxe_map_api_firewall_open_to_all
+    fail_msg: >-
+      pxe_map_api_allowed_sources is empty for {{ inventory_hostname }}.
+      firewalld blocks port {{ pxe_map_api_port }} by default, so this
+      site's MCE cluster could not reach the API and every IPMI install would
+      retry forever. Set pxe_map_api_allowed_sources (the IPs/CIDRs the MCE
+      calls the API from) in
+      inventory/host_vars/{{ inventory_hostname }}/vars.yml, or set
+      pxe_map_api_firewall_open_to_all: true there if every source - booting
+      hosts included - is genuinely meant to reach it.
+    success_msg: >-
+      API port {{ pxe_map_api_port }} will be opened to
+      {{ 'every source' if pxe_map_api_firewall_open_to_all else pxe_map_api_allowed_sources | join(', ') }}
+      on {{ inventory_hostname }}
+
 - name: Verify the app source is where pxe_map_api_src_dir points
   ansible.builtin.stat:
     path: "{{ pxe_map_api_src_dir }}/app/main.py"

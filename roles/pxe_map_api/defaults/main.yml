@@ -14,6 +14,29 @@ pxe_map_api_bind: "0.0.0.0:8080"
 pxe_map_api_token: ""
 pxe_map_api_allow_no_auth: false
 
+# The port firewalld opens - derived from the bind, so the two cannot drift.
+pxe_map_api_port: "{{ pxe_map_api_bind.rsplit(':', 1) | last }}"
+
+# Who may reach that port: the source addresses/CIDRs this site's MCE cluster
+# calls the API from (its nodes' or egress IPs) - the API's only client.
+# Never the provisioning network the booting hosts DHCP on. RHEL's firewalld
+# blocks the port by default, so with nothing here the API is unreachable
+# from the MCE and every IPMI install retries forever against it; preflight
+# therefore refuses an empty list unless pxe_map_api_firewall_open_to_all is
+# set explicitly (same pattern as the token). Set per site in
+# inventory/host_vars/<site>/vars.yml.
+pxe_map_api_allowed_sources: []
+pxe_map_api_firewall_open_to_all: false
+
+# The interpreter the venv is built with - NOT the platform python3: RHEL 9's
+# is 3.9, and the app needs >= 3.10 (`X | None` annotations at import time;
+# python-dotenv 1.2.2 has no 3.9 release at all). python3.12 ships in RHEL
+# 9.4+ AppStream, so it comes from the same OS mirror as everything else.
+# The local pip mirror must carry wheels for THIS version (cp312 - pydantic-core
+# is the compiled one). Changing it rebuilds the venv on the next run.
+pxe_map_api_python_version: "3.12"
+pxe_map_api_python: "python{{ pxe_map_api_python_version }}"
+
 # Air-gapped: pip installs from this local mirror only, never PyPI. Same
 # requirement as the old deploy/install.sh's LOCAL_MIRROR.
 pxe_map_api_local_mirror: /path/to/local/pip-mirror

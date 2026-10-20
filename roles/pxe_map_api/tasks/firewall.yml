@@ -1,0 +1,28 @@
+---
+# The API port is opened ONLY here - pxe_server opens TFTP and HTTP/80 for the
+# booting hosts, never this one. Its one client is this site's MCE cluster, so
+# by default only the sources listed for it get in (preflight refuses to run
+# with none listed unless open-to-all is explicit).
+#
+# Rules are only ever ADDED: a source taken off pxe_map_api_allowed_sources
+# keeps its rule until removed by hand
+# (`firewall-cmd --permanent --remove-rich-rule=...; firewall-cmd --reload`).
+- name: Open the API port to the allowed sources only
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in item else 'ipv4' }}"
+      source address="{{ item }}"
+      port port="{{ pxe_map_api_port }}" protocol="tcp" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ pxe_map_api_allowed_sources }}"
+  when: not pxe_map_api_firewall_open_to_all
+
+- name: Open the API port to every source (explicitly requested)
+  ansible.posix.firewalld:
+    port: "{{ pxe_map_api_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  when: pxe_map_api_firewall_open_to_all

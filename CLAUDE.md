@@ -55,11 +55,15 @@ ansible-playbook site.yml --ask-vault-pass --tags pxe_server --limit pxe-site1  
   `pxe_map_api_allow_no_auth: true` is explicit, and checks the app repo is
   where `pxe_map_api_src_dir` says it is), `user.yml` (system user +
   `PXE_MAP_DIR`), `selinux.yml` (`community.general.sefcontext` +
-  `restorecon`, skipped when SELinux isn't enabled), `app.yml` (copies
-  `app/` + `requirements.txt` from `pxe_map_api_src_dir`, builds the venv
-  from the local pip mirror only - never PyPI), `service.yml` (renders
-  `templates/env.j2` and `templates/pxe-map-api.service.j2`, enables +
-  starts the service, restarts on any change via `handlers/main.yml`).
+  `restorecon`, skipped when SELinux isn't enabled), `app.yml` (installs
+  `python3.12`, copies `app/` + `requirements.txt` from
+  `pxe_map_api_src_dir`, builds the venv with `python3.12` - rebuilding one
+  made with another interpreter - from the local pip mirror only, never
+  PyPI), `service.yml` (renders `templates/env.j2` and
+  `templates/pxe-map-api.service.j2`, enables + starts the service,
+  restarts on any change via `handlers/main.yml`), `firewall.yml` (opens
+  the API port to `pxe_map_api_allowed_sources` only, one rich rule each,
+  or to all with `pxe_map_api_firewall_open_to_all`).
 - `inventory/hosts.yml` - the 5 site VMs, group `pxe_map_api_sites` (kept as
   the group name even though it now provisions both layers, to avoid an
   unnecessary inventory rename).
@@ -82,6 +86,15 @@ ansible-playbook site.yml --ask-vault-pass --tags pxe_server --limit pxe-site1  
   playbook finds the app code to copy - this repo has none of its own.
   Don't vendor a copy of `app/` in here; that defeats the point of having
   two repos.
+- The venv is built with `pxe_map_api_python` (`python3.12`), never the
+  platform `python3`: RHEL 9's is 3.9, and the app does not install
+  (`python-dotenv==1.2.2` has no 3.9 release) or import (`X | None`
+  annotations) there - verified on a UBI 9.4 image. Don't switch it back.
+- The API port is opened ONLY by `pxe_map_api`'s `firewall.yml`, only to
+  the listed sources; preflight refuses an empty list unless
+  `pxe_map_api_firewall_open_to_all` is explicit (same pattern as the
+  token). The playbook only configures the PXE VMs - the API's client (the
+  MCE side) is deployed elsewhere (Argo CD), never from here.
 - The preflight no-token check exists on purpose (mirrors
   `app/config.py`'s own runtime warning in the app repo, enforced earlier
   and harder here because the blast radius is 5 VMs, not one dev's

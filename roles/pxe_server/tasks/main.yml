@@ -31,11 +31,14 @@
     mode: "0644"
   notify: Restart dnsmasq
 
-# The stock RHEL nginx.conf ships a "server { listen 80 default_server; ... }"
-# block that otherwise conflicts with pxe-map.conf below ("listen directive is
-# not allowed here"). Disabling just the listen directives (rather than
-# deleting the whole block) is enough to resolve the conflict and is safe to
-# match idempotently - it no-ops once already commented out.
+# Older RHEL nginx.conf (RHEL 8) ships a "server { listen 80 default_server; }"
+# block that would take requests away from pxe-map.conf below. Disabling just
+# the listen directives (rather than deleting the whole block) resolves that
+# and is safe to match idempotently - it no-ops once already commented out.
+# RHEL 9's stock block (nginx 1.20) says plain `listen 80;`, so these two
+# never match there - and need not: nginx.conf includes conf.d/*.conf BEFORE
+# that block, which makes pxe-map.conf the default server on :80 (checked
+# against the RHEL 9 nginx package).
 - name: Disable the stock nginx default server block on port 80 (IPv4)
   ansible.builtin.replace:
     path: /etc/nginx/nginx.conf

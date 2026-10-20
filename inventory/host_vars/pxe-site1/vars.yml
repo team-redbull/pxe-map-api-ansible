@@ -12,3 +12,12 @@
 # running --tags pxe_server (see DEPLOY.md).
 pxe_server_vm_ip: "10.10.1.5"
 pxe_server_interface: eth0
+
+# REQUIRED by the pxe_map_api role (preflight fails without it): the source
+# IPs/CIDRs allowed through firewalld to the API port (the port of
+# pxe_map_api_bind, 8080 by default) - the addresses this site's MCE cluster
+# calls the API from (its nodes' or egress IPs). Not the provisioning network
+# the booting hosts are on. Or set pxe_map_api_firewall_open_to_all: true to
+# open the port to every source instead.
+# pxe_map_api_allowed_sources:
+#   - "10.10.1.0/26"

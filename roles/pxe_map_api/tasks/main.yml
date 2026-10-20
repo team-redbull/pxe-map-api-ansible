@@ -13,3 +13,6 @@
 
 - name: Config and systemd service
   ansible.builtin.import_tasks: service.yml
+
+- name: Firewall for the API port
+  ansible.builtin.import_tasks: firewall.yml

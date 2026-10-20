@@ -30,14 +30,20 @@ reachable over HTTP; after that, re-running either independently is fine.
   mirror/Satellite (this repo doesn't configure repo files itself, just
   installs from whatever's configured) - it needs to provide `dnsmasq`,
   `nginx`, `tftp-server`, `ipxe-bootimgs-x86`, and
-  `policycoreutils-python-utils` for the `pxe_server` role. Air-gapped:
+  `policycoreutils-python-utils` for the `pxe_server` role, and
+  **`python3.12`** (RHEL 9.4+ AppStream) for the `pxe_map_api` role. Air-gapped:
   no internet access is assumed or used.
 - A local **pip** package mirror reachable from every site VM (separate
   from the OS package mirror above), containing `fastapi==0.115.6`,
   `uvicorn==0.34.0`, `pydantic==2.10.4`, `python-dotenv==1.2.2` and their
   transitive deps (see the app repo's `requirements.txt` - always check
-  that file, this list can drift out of date). The `pxe_map_api` role runs
+  that file, this list can drift out of date), **as wheels for Python 3.12**
+  (`cp312` - `pydantic-core` is the compiled one). The `pxe_map_api` role runs
   `pip install --no-index --find-links=<mirror>` - it never touches PyPI.
+  It builds the venv with `python3.12`, not the platform `python3`: RHEL 9's
+  is 3.9, which the app cannot run on (it needs >= 3.10, and
+  `python-dotenv==1.2.2` has no 3.9 release at all - verified on a UBI 9.4
+  image). `pxe_map_api_python_version` overrides it.
 - **A checkout of the `pxe-map-api` app repo as a sibling directory of this
   one**:
   ```
@@ -107,21 +113,36 @@ see the app repo's `CLAUDE.md`), skip the token and set
 `pxe_map_api_allow_no_auth: true` in that site's `vars.yml` instead. The
 playbook's preflight check refuses to deploy an empty token otherwise.
 
-## 5. Review the bind address per site
+## 5. Set who may reach the API, and review the bind address per site
 
-Default (`roles/pxe_map_api/defaults/main.yml`):
-`pxe_map_api_bind: "0.0.0.0:8080"` - listens on every interface. This is
-wider than the app's SPEC.md "narrowest sensible option" guidance (the
-service only needs to be reachable by the central BMH-creation endpoint,
-never by booting hosts). Bearer-token auth still protects every route
-except `/healthz`, but for defense in depth, override per site in
-`inventory/host_vars/<site>/vars.yml`:
+**Required:** the API port (the port of `pxe_map_api_bind`, `8080` by
+default) is closed by firewalld until this role opens it, and the role opens
+it only to the sources you list per site in
+`inventory/host_vars/<site>/vars.yml` - the IPs/CIDRs that site's MCE
+cluster calls the API from (its nodes' or egress IPs):
+
+```yaml
+pxe_map_api_allowed_sources:
+  - "10.10.1.0/26"
+```
+
+The preflight check refuses to deploy a site with an empty list, the same
+way it refuses an empty token - with nothing listed the MCE cannot reach the
+API, and every IPMI install retries against it forever. To open the port to
+every source instead (booting hosts included - not recommended), set
+`pxe_map_api_firewall_open_to_all: true`. Rules are only added, never
+removed: a source dropped from the list keeps its rule until you remove it
+with `firewall-cmd --permanent --remove-rich-rule='...' && firewall-cmd --reload`.
+
+Bind: `pxe_map_api_bind: "0.0.0.0:8080"` by default
+(`roles/pxe_map_api/defaults/main.yml`) - listens on every interface, the
+firewall rule above being what limits who gets in. For defense in depth,
+override per site:
 
 ```yaml
 pxe_map_api_bind: "10.10.1.5:8080"   # this site's management-facing IP
 ```
 
-or firewall 8080 down to the central endpoint's source IP on each VM.
 Never bind on the interface that serves PXE/TFTP/nginx traffic to booting
 hosts.
 
@@ -192,8 +213,10 @@ more detail.
 `pxe_map_api` (layer 2):
 
 1. Fails the run (preflight) if that site has no token and hasn't
-   explicitly opted into `pxe_map_api_allow_no_auth`, or if the app repo
-   isn't found at `pxe_map_api_src_dir` on the control node.
+   explicitly opted into `pxe_map_api_allow_no_auth`, if it lists no
+   `pxe_map_api_allowed_sources` and hasn't opted into
+   `pxe_map_api_firewall_open_to_all`, or if the app repo isn't found at
+   `pxe_map_api_src_dir` on the control node.
 2. Creates the `pxe-map-api` system user (no login shell, no home dir).
 3. Creates `/var/www/pxe-map` (dir `0755`, existing files re-chmod'd to
    `0644`), owned by that user.
@@ -201,15 +224,19 @@ more detail.
    (`httpd_sys_content_t` on `/var/www/pxe-map(/.*)?`) and runs
    `restorecon -Rv` so the label survives reboots and reruns. Skipped
    automatically on a non-SELinux host.
-5. Copies `app/` and `requirements.txt` (from the sibling `pxe-map-api`
-   checkout) into `/opt/pxe-map-api`, creates a venv there, and installs
-   deps from the local pip mirror with `pip install --no-index` (never
-   touches the network).
+5. Installs `python3.12`, copies `app/` and `requirements.txt` (from the
+   sibling `pxe-map-api` checkout) into `/opt/pxe-map-api`, creates a venv
+   there with `python3.12` - rebuilding one an earlier run made with another
+   Python - and installs deps from the local pip mirror with
+   `pip install --no-index` (never touches the network).
 6. Renders `/etc/pxe-map-api/env` from that site's `vars.yml`/`vault.yml`
    (`PXE_MAP_DIR`, `PXE_MAP_BIND`, `PXE_MAP_TOKEN`) and the systemd unit,
    both from Jinja2 templates in `roles/pxe_map_api/templates/`.
 7. Restarts the service if the env file, unit file, or app code changed;
    enables and starts it either way.
+8. Opens the API port in firewalld to `pxe_map_api_allowed_sources` only
+   (one rich rule per source), or to everyone with
+   `pxe_map_api_firewall_open_to_all: true`.
 
 Both roles are idempotent - rerun any time (e.g. after an app code change,
 to pick up a rotated token, or to reapply layer 1's config) and only
@@ -221,7 +248,7 @@ what actually changed gets touched.
 ssh <site-vm>
 sudo systemctl status dnsmasq nginx
 curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/pxe-map/   # -> 403 (autoindex off) or 404, not connection refused
-tftp localhost -c get boot.ipxe /tmp/boot.ipxe && cat /tmp/boot.ipxe
+tftp localhost -c get boot.ipxe /tmp/boot.ipxe && cat /tmp/boot.ipxe   # needs the `tftp` client package (not installed by the role)
 ls -Z /var/www/pxe-map /var/lib/tftpboot
 # -> httpd_sys_content_t on /var/www/pxe-map, tftpdir_rw_t on /var/lib/tftpboot
 sudo firewall-cmd --list-all
@@ -262,6 +289,15 @@ If the `ls -Z` context isn't `httpd_sys_content_t`, the SELinux fcontext
 rule didn't take - rerun the playbook and check
 `sudo ausearch -m avc -ts recent` for denials.
 
+The checks above all run on the VM itself, so they pass even with the API
+port closed to the outside. Check it from where the API is actually called
+from - a node of this site's MCE cluster (e.g. `oc debug node/<node>`):
+
+```bash
+sudo firewall-cmd --list-rich-rules        # on the VM: one rule per allowed source
+curl -sS http://<site-vm>:8080/healthz     # from the MCE: {"status":"ok"}, not a timeout
+```
+
 Also: `sudo journalctl -u pxe-map-api -f` to tail logs while testing - see
 the app repo's `app/main.py` request-logging middleware for what gets
 logged per request.
@@ -298,8 +334,8 @@ re-templates `boot.ipxe` to look up every NIC's MAC (install-server now maps
 only the BareMetalHost's boot MAC), and `pxe_map_api` deploys the app that
 writes `<mce_cluster>/<infra_env>.ipxe` boot entries, the conditional
 `DELETE ?mce_cluster=` remove-server relies on, and `0644` files nginx can
-read. The `workflows` repo's server-lifecycle-worker on each MCE needs this
-on its site's VM: until then IPMI installs fail with a 422 from the old API.
+read. Until a site's VM runs it, IPMI installs from that site's MCE fail
+with a 422 from the old API.
 
 ## Uninstalling
 
