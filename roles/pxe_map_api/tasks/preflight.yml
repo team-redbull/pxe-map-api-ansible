@@ -21,6 +21,7 @@
       {{ inventory_hostname }}
 
 - name: Refuse to deploy without saying who may reach the API port
+  when: pxe_server_firewalld_enabled | default(false) | bool
   ansible.builtin.assert:
     that:
       - (pxe_map_api_allowed_sources | length > 0) or pxe_map_api_firewall_open_to_all

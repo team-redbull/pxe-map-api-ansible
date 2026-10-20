@@ -8,7 +8,7 @@
 pxe_server_vm_ip: "10.10.5.5"
 pxe_server_interface: eth0
 
-# REQUIRED by the pxe_map_api role - the IPs/CIDRs this site's MCE cluster
-# calls the API from (see host_vars/pxe-site1/vars.yml).
+# Only with pxe_server_firewalld_enabled: true - the IPs/CIDRs this site's
+# MCE cluster calls the API from (see host_vars/pxe-site1/vars.yml).
 # pxe_map_api_allowed_sources:
 #   - "10.10.5.0/26"

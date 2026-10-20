@@ -9,3 +9,9 @@ pxe_map_api_local_mirror: /path/to/local/pip-mirror
 # Same on every site VM today (nginx is already configured to serve this
 # path read-only - see SPEC.md). Override per-host if a site differs.
 pxe_map_api_dir: /var/www/pxe-map
+
+# No host firewall on the PXE VMs: access is controlled outside them, so
+# both roles stop/disable firewalld and manage no rules. Set true (here or per
+# site) to keep firewalld and have the roles open TFTP, HTTP/80 and the API
+# port - pxe_map_api_allowed_sources is then required per site.
+pxe_server_firewalld_enabled: false

@@ -17,3 +17,11 @@ pxe_server_tftp_port_range_start: 50000
 pxe_server_tftp_port_range_end: 50100
 
 pxe_server_ipxe_efi_src: /usr/share/ipxe/ipxe-x86_64.efi
+
+# Whether the VM runs firewalld. false (the default): access to the VM is
+# controlled OUTSIDE it, so firewalld is stopped and disabled (if installed)
+# and no rules are managed - TFTP, HTTP/80 and the pxe-map-api port are then
+# open to anything that can route to the VM. true: firewalld stays on, this
+# role opens TFTP + HTTP + the TFTP data range, and the pxe_map_api role opens
+# its port to pxe_map_api_allowed_sources (required then - see preflight).
+pxe_server_firewalld_enabled: false

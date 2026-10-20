@@ -98,6 +98,22 @@
   changed_when: _pxe_server_tftp_restorecon.stdout != ""
   when: ansible_facts.selinux.status | default('disabled') == 'enabled'
 
+- name: Gather service facts (is firewalld installed?)
+  ansible.builtin.service_facts:
+  when: not (pxe_server_firewalld_enabled | bool)
+
+# Access to the VM is controlled outside it (pxe_server_firewalld_enabled:
+# false), so no host firewall: left running, firewalld would block TFTP, HTTP
+# and the API port, and with no rules managed here nothing would open them.
+- name: Stop and disable firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+  when:
+    - not (pxe_server_firewalld_enabled | bool)
+    - "'firewalld.service' in ansible_facts.services"
+
 - name: Open firewalld for TFTP and HTTP
   ansible.posix.firewalld:
     service: "{{ item }}"
@@ -107,6 +123,7 @@
   loop:
     - tftp
     - http
+  when: pxe_server_firewalld_enabled | bool
 
 - name: Open firewalld for the dnsmasq TFTP data port range
   ansible.posix.firewalld:
@@ -114,6 +131,7 @@
     permanent: true
     immediate: true
     state: enabled
+  when: pxe_server_firewalld_enabled | bool
 
 - name: Enable and start dnsmasq
   ansible.builtin.service:

@@ -14,5 +14,8 @@
 - name: Config and systemd service
   ansible.builtin.import_tasks: service.yml
 
+# Only when the VM runs firewalld (pxe_server_firewalld_enabled, the
+# pxe_server role's switch - default false, firewalld stopped).
 - name: Firewall for the API port
   ansible.builtin.import_tasks: firewall.yml
+  when: pxe_server_firewalld_enabled | default(false) | bool

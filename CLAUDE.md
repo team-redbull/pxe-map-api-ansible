@@ -45,8 +45,9 @@ ansible-playbook site.yml --ask-vault-pass --tags pxe_server --limit pxe-site1  
   not a full block delete), templates `/etc/nginx/conf.d/pxe-map.conf`,
   creates the PXE map directory (owner `nginx`), sets SELinux fcontexts
   (`httpd_sys_content_t` on the PXE map dir, `tftpdir_rw_t` on the TFTP
-  root, both skipped when SELinux isn't enabled), opens firewalld
-  (TFTP + HTTP services, the dnsmasq TFTP data port range), and
+  root, both skipped when SELinux isn't enabled), stops + disables
+  firewalld by default - or, with `pxe_server_firewalld_enabled: true`,
+  opens it for TFTP + HTTP and the dnsmasq TFTP data port range - and
   enables/starts both services. Handlers restart on config change only.
   See `roles/pxe_server/README.md` for the full variable list and the boot
   chain it implements.
@@ -90,11 +91,17 @@ ansible-playbook site.yml --ask-vault-pass --tags pxe_server --limit pxe-site1  
   platform `python3`: RHEL 9's is 3.9, and the app does not install
   (`python-dotenv==1.2.2` has no 3.9 release) or import (`X | None`
   annotations) there - verified on a UBI 9.4 image. Don't switch it back.
-- The API port is opened ONLY by `pxe_map_api`'s `firewall.yml`, only to
-  the listed sources; preflight refuses an empty list unless
-  `pxe_map_api_firewall_open_to_all` is explicit (same pattern as the
-  token). The playbook only configures the PXE VMs - the API's client (the
-  MCE side) is deployed elsewhere (Argo CD), never from here.
+- Host firewall is ONE switch, `pxe_server_firewalld_enabled` (group_vars,
+  default `false` - decided with the user 2026-10-20: access to the VMs is
+  controlled outside them). `false`: `pxe_server` stops + disables firewalld
+  (if installed) and no task in either role touches firewall rules. `true`:
+  `pxe_server` opens TFTP/HTTP/the TFTP data range, and `pxe_map_api`'s
+  `firewall.yml` opens the API port only to `pxe_map_api_allowed_sources`,
+  whose preflight check (refusing an empty list unless
+  `pxe_map_api_firewall_open_to_all`) runs only then. Every firewalld task
+  must stay behind that switch - one left unconditional fails the run on a VM
+  without firewalld. The playbook only configures the PXE VMs - the API's
+  client (the MCE side) is deployed elsewhere (Argo CD), never from here.
 - The preflight no-token check exists on purpose (mirrors
   `app/config.py`'s own runtime warning in the app repo, enforced earlier
   and harder here because the blast radius is 5 VMs, not one dev's

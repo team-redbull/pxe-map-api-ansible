@@ -113,11 +113,21 @@ see the app repo's `CLAUDE.md`), skip the token and set
 `pxe_map_api_allow_no_auth: true` in that site's `vars.yml` instead. The
 playbook's preflight check refuses to deploy an empty token otherwise.
 
-## 5. Set who may reach the API, and review the bind address per site
+## 5. Firewall, and the bind address per site
 
-**Required:** the API port (the port of `pxe_map_api_bind`, `8080` by
-default) is closed by firewalld until this role opens it, and the role opens
-it only to the sources you list per site in
+**Default: no host firewall.** `pxe_server_firewalld_enabled: false`
+(`inventory/group_vars/pxe_map_api_sites.yml`) makes the `pxe_server` role
+STOP and DISABLE firewalld on each VM (if installed) and both roles manage no
+rules - access to the VMs is controlled outside them. TFTP, HTTP/80 and the
+API port are then reachable by anything that can route to the VM, booting
+hosts included; the bearer token still protects every API route except
+`/healthz`. Make sure whatever filters traffic in front of the VMs allows:
+the MCE -> VM on the API port (`8080`), and the booting hosts -> VM on TFTP
+(`69/udp` + `50000-50100/udp`) and HTTP `80`.
+
+**Optional: keep firewalld** with `pxe_server_firewalld_enabled: true`
+(globally or per site). Then `pxe_server` opens TFTP, HTTP and the TFTP data
+range, and the API port is opened only to the sources you list per site in
 `inventory/host_vars/<site>/vars.yml` - the IPs/CIDRs that site's MCE
 cluster calls the API from (its nodes' or egress IPs):
 
@@ -126,9 +136,9 @@ pxe_map_api_allowed_sources:
   - "10.10.1.0/26"
 ```
 
-The preflight check refuses to deploy a site with an empty list, the same
-way it refuses an empty token - with nothing listed the MCE cannot reach the
-API, and every IPMI install retries against it forever. To open the port to
+With firewalld on, the preflight check refuses to deploy a site with an
+empty list, the same way it refuses an empty token - with nothing listed the
+MCE cannot reach the API, and every IPMI install retries against it forever. To open the port to
 every source instead (booting hosts included - not recommended), set
 `pxe_map_api_firewall_open_to_all: true`. Rules are only added, never
 removed: a source dropped from the list keeps its rule until you remove it
@@ -205,16 +215,19 @@ more detail.
    `tftpdir_rw_t` on the TFTP root) and runs `restorecon -Rv` on both.
    Skipped automatically on a non-SELinux host (e.g. testing in a
    container).
-8. Opens firewalld for the `tftp` and `http` services and the dnsmasq TFTP
-   data port range (`50000-50100/udp` by default), permanent + immediate.
+8. With `pxe_server_firewalld_enabled: false` (the default) stops and
+   disables firewalld if it is installed; with `true`, opens firewalld for
+   the `tftp` and `http` services and the dnsmasq TFTP data port range
+   (`50000-50100/udp` by default), permanent + immediate.
 9. Enables and starts `dnsmasq` and `nginx`; handlers restart either only
    if its config actually changed.
 
 `pxe_map_api` (layer 2):
 
 1. Fails the run (preflight) if that site has no token and hasn't
-   explicitly opted into `pxe_map_api_allow_no_auth`, if it lists no
-   `pxe_map_api_allowed_sources` and hasn't opted into
+   explicitly opted into `pxe_map_api_allow_no_auth`, if firewalld is on
+   (`pxe_server_firewalld_enabled: true`) and it lists no
+   `pxe_map_api_allowed_sources` nor opted into
    `pxe_map_api_firewall_open_to_all`, or if the app repo isn't found at
    `pxe_map_api_src_dir` on the control node.
 2. Creates the `pxe-map-api` system user (no login shell, no home dir).
@@ -234,9 +247,9 @@ more detail.
    both from Jinja2 templates in `roles/pxe_map_api/templates/`.
 7. Restarts the service if the env file, unit file, or app code changed;
    enables and starts it either way.
-8. Opens the API port in firewalld to `pxe_map_api_allowed_sources` only
-   (one rich rule per source), or to everyone with
-   `pxe_map_api_firewall_open_to_all: true`.
+8. Only with `pxe_server_firewalld_enabled: true`: opens the API port in
+   firewalld to `pxe_map_api_allowed_sources` only (one rich rule per
+   source), or to everyone with `pxe_map_api_firewall_open_to_all: true`.
 
 Both roles are idempotent - rerun any time (e.g. after an app code change,
 to pick up a rotated token, or to reapply layer 1's config) and only
@@ -251,8 +264,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/pxe-map/   # -> 403 (
 tftp localhost -c get boot.ipxe /tmp/boot.ipxe && cat /tmp/boot.ipxe   # needs the `tftp` client package (not installed by the role)
 ls -Z /var/www/pxe-map /var/lib/tftpboot
 # -> httpd_sys_content_t on /var/www/pxe-map, tftpdir_rw_t on /var/lib/tftpboot
-sudo firewall-cmd --list-all
-# -> tftp and http services, and the 50000-100/udp port range, all present
+systemctl is-active firewalld
+# -> inactive (default, pxe_server_firewalld_enabled: false). With true:
+#    sudo firewall-cmd --list-all shows tftp, http and 50000-50100/udp
 ```
 
 ## 8. Verify the API layer on one VM
@@ -294,8 +308,8 @@ port closed to the outside. Check it from where the API is actually called
 from - a node of this site's MCE cluster (e.g. `oc debug node/<node>`):
 
 ```bash
-sudo firewall-cmd --list-rich-rules        # on the VM: one rule per allowed source
 curl -sS http://<site-vm>:8080/healthz     # from the MCE: {"status":"ok"}, not a timeout
+sudo firewall-cmd --list-rich-rules        # on the VM, only with firewalld on: one rule per allowed source
 ```
 
 Also: `sudo journalctl -u pxe-map-api -f` to tail logs while testing - see

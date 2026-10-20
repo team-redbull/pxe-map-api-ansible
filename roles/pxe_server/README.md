@@ -35,6 +35,7 @@ sibling `pxe_map_api` role for that).
 | `pxe_server_pxe_map_dir` | `/var/www/pxe-map` | Same literal path as `pxe_map_api_dir` in the `pxe_map_api` role - override both together if you change it. |
 | `pxe_server_tftp_port_range_start` / `_end` | `50000` / `50100` | dnsmasq's TFTP data-connection port range, opened in firewalld. |
 | `pxe_server_ipxe_efi_src` | `/usr/share/ipxe/ipxe-x86_64.efi` | Source path on the target host (from the `ipxe-bootimgs-x86` package), copied into the TFTP root. |
+| `pxe_server_firewalld_enabled` | `false` | `false`: firewalld is stopped and disabled (if installed) and no rules are managed - access is controlled outside the VM. `true`: firewalld stays on and this role opens TFTP, HTTP and the TFTP data range (the `pxe_map_api` role then opens its own port). |
 
 ## Out of scope (on purpose)
 
